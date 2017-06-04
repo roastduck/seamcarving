@@ -1,18 +1,21 @@
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <vector>
 #include <string>
 #include <cassert>
 #include <iostream>
 #include <opencv2/opencv.hpp>
+#include "ui.h"
 
 /**
  * Proform DP and delete a seam
  * @return : Vector of original coordiates
  */
-std::vector<int> dp(cv::Mat3b &image, cv::Mat1i &coord)
+std::vector<int> dp(cv::Mat3b &image, cv::Mat1i &coord, cv::Mat1b &delMask)
 {
     assert(coord.empty() || image.rows == coord.rows && image.cols == coord.cols);
+    assert(delMask.empty() || image.rows == delMask.rows && image.cols == delMask.cols);
     cv::Mat3d dx, dy;
     cv::Sobel(image, dx, CV_64F, 1, 0, 7);
     cv::Sobel(image, dy, CV_64F, 0, 1, 7);
@@ -21,7 +24,7 @@ std::vector<int> dp(cv::Mat3b &image, cv::Mat1i &coord)
     cv::Mat1d weight(image.rows, image.cols);
     for (int i = 0; i < image.rows; i++)
         for (int j = 0; j < image.cols; j++)
-            weight(i, j) = norm(dx(i, j)) + norm(dy(i, j));
+            weight(i, j) = !delMask.empty() && delMask(i, j) ? -1e10 : norm(dx(i, j)) + norm(dy(i, j));
 
     cv::Mat1i last(image.rows, image.cols);
     for (int i = 1; i < image.rows; i++)
@@ -38,6 +41,7 @@ std::vector<int> dp(cv::Mat3b &image, cv::Mat1i &coord)
     std::vector<int> seam(coord.rows); // if coord.empty() than seam.empty()
     cv::Mat3b _image(image.rows, image.cols - 1);
     cv::Mat1i _coord(coord.rows, coord.empty() ? 0 : coord.cols - 1);
+    cv::Mat1b _delMask(delMask.rows, delMask.empty() ? 0 : delMask.cols - 1);
     double val(weight(image.rows - 1, 0)), pos(0);
     for (int j = 1; j < image.cols; j++)
         if (weight(image.rows - 1, j) < val)
@@ -46,23 +50,34 @@ std::vector<int> dp(cv::Mat3b &image, cv::Mat1i &coord)
     {
         if (!coord.empty())
             seam[i] = coord(i, pos);
-        pos = last(i, pos);
         for (int j = 0; j < image.cols - 1; j++)
         {
             _image(i, j) = image(i, j < pos ? j : j + 1);
             if (!coord.empty())
                 _coord(i, j) = coord(i, j < pos ? j : j + 1);
+            if (!delMask.empty())
+                _delMask(i, j) = delMask(i, j < pos ? j : j + 1);
         }
+        pos = last(i, pos);
     }
-    image = _image, coord = _coord;
+    image = _image, coord = _coord, delMask = _delMask;
     return seam;
+}
+
+cv::Mat3b delMasked(cv::Mat3b image, cv::Mat1b delMask)
+{
+    cv::Mat1i coord;
+    while (cv::countNonZero(delMask))
+        dp(image, coord, delMask);
+    return image;
 }
 
 cv::Mat3b carveHoriDec(cv::Mat3b image, int target)
 {
     cv::Mat1i coord;
+    cv::Mat1b delMask;
     while (image.cols > target)
-        dp(image, coord);
+        dp(image, coord, delMask);
     return image;
 }
 
@@ -83,7 +98,8 @@ cv::Mat3b carveHoriInc(cv::Mat3b image, int target)
             coord.copyTo(coordDp);
             origin = image.cols;
         }
-        auto seam = dp(imageDp, coordDp);
+        cv::Mat1b delMask;
+        auto seam = dp(imageDp, coordDp, delMask);
         cv::Mat3b _image(image.rows, image.cols + 1);
         cv::Mat1i _coord(coord.rows, coord.cols + 1);
         for (int i = 0; i < image.rows; i++)
@@ -123,6 +139,13 @@ int main(int argc, const char **argv)
     sscanf(argv[4], "%d", &targetHeight);
     cv::Mat3b image = cv::imread(inputFile);
 
+    cv::Mat1b delMask = getMask(image);
+
+    std::cout << "Processing" << std::endl;
+    if (image.cols - targetWidth >= image.rows - targetHeight)
+        image = delMasked(image, delMask);
+    else
+        image = delMasked(image.t(), delMask.t()).t();
     image = carveHori(image, targetWidth);
     image = carveHori(image.t(), targetHeight).t();
 
