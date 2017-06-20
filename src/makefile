@@ -1,7 +1,7 @@
 ifeq ($(DEBUG), true)
-	PARAM = -ggdb3 -Wall -std=c++11 -fopenmp
+	PARAM = -ggdb3 -Wall -std=c++11
 else
-	PARAM = -O3 -DNDEBUG -std=c++11 -fopenmp
+	PARAM = -O3 -DNDEBUG -std=c++11
 endif
 
 LINKPARAM = -lopencv_core -lopencv_imgproc -lopencv_imgcodecs -lopencv_highgui
